@@ -1,4 +1,4 @@
-## Text Metrics
+## Pretext
 
 Internal notes for contributors and agents. Use `README.md` as the public source of truth for API examples, benchmark/accuracy numbers, and user-facing limitations. Use `RESEARCH.md` for the detailed exploration log.
 

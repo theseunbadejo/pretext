@@ -1,4 +1,4 @@
-# text-metrics
+# pretext
 
 Text measurement for the browser. Predicts text block heights without triggering layout reflow on the resize hot path.
 
@@ -37,7 +37,7 @@ const { height, lineCount } = layout(block, containerWidth, 19)
 
 | Approach | Time | DOM-free |
 |---|---|---|
-| **text-metrics** | **0.11ms** | Yes |
+| **pretext** | **0.11ms** | Yes |
 | DOM batch (write all, read all) | 0.18ms | No |
 | DOM interleaved (per-component) | varies, much worse in practice | No |
 | Sebastian's text-layout (no cache) | 30ms | Yes |

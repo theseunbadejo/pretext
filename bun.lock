@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "text-metrics",
+      "name": "pretext",
       "dependencies": {
         "harfbuzzjs": "^0.10.0",
       },
