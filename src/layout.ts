@@ -68,6 +68,22 @@ function parseFontSize(font: string): number {
   return m ? parseFloat(m[1]!) : 16
 }
 
+const collapsibleWhitespaceRunRe = /[ \t\n\r\f]+/g
+const needsWhitespaceNormalizationRe = /[\t\n\r\f]| {2,}|^ | $/
+
+function normalizeWhitespaceNormal(text: string): string {
+  if (!needsWhitespaceNormalizationRe.test(text)) return text
+
+  let normalized = text.replace(collapsibleWhitespaceRunRe, ' ')
+  if (normalized.charCodeAt(0) === 0x20) {
+    normalized = normalized.slice(1)
+  }
+  if (normalized.length > 0 && normalized.charCodeAt(normalized.length - 1) === 0x20) {
+    normalized = normalized.slice(0, -1)
+  }
+  return normalized
+}
+
 // Emoji correction: canvas measureText inflates emoji widths on Chrome/Firefox
 // at font sizes <24px on macOS. The inflation is per-emoji-grapheme, constant
 // across all emoji types (simple, ZWJ, flags, skin tones, keycaps) and all font
@@ -185,12 +201,15 @@ const kinsokuStart = new Set([
   '\u303B', // 〻
 ])
 
-// Line-end prohibition: these characters cannot end a line (UAX #14 class OP +
-// CJK opening brackets). To prevent this, they are merged with the following
-// grapheme in CJK splitting, and with the following word in general merging.
+// Line-end prohibition: these characters should stay with the following text.
+// To prevent line starts with opening punctuation, they are merged with the
+// following grapheme in CJK splitting, and with the following word in general
+// merging.
 const kinsokuEnd = new Set([
   // ASCII/Latin
   '(', '[', '{',
+  // Curly quotes / guillemets
+  '“', '‘', '«', '‹',
   // CJK fullwidth
   '\uFF08', // （
   '\u3014', // 〔
@@ -368,10 +387,11 @@ function prepareInternal(text: string, font: string, includeSegments: boolean): 
 
   const emojiCorrection = getEmojiCorrection(font, fontSize)
 
-  // CSS white-space: normal collapses newlines to spaces.
-  const normalized = text.replace(/\n/g, ' ')
+  // CSS white-space: normal collapses runs of normal whitespace and strips
+  // leading/trailing collapsible whitespace.
+  const normalized = normalizeWhitespaceNormal(text)
 
-  if (normalized.length === 0 || normalized.trim().length === 0) {
+  if (normalized.length === 0) {
     if (includeSegments) {
       return { widths: [], isSpace: [], segLevels: null, breakableWidths: [], segments: [] }
     }
@@ -408,9 +428,10 @@ function prepareInternal(text: string, font: string, includeSegments: boolean): 
     }
   }
 
-  // Forward-merge opening brackets with the following segment (UAX #14: opening
-  // punctuation can't end a line). E.g. "(" + "approximately" → "(approximately".
-  // Mark deleted entries with empty string instead of shifting (O(1) vs O(n)).
+  // Forward-merge opening punctuation with the following segment so it doesn't
+  // get stranded at line end. E.g. "(" + "approximately" → "(approximately",
+  // "“" + "Whenever" → "“Whenever". Mark deleted entries with empty string
+  // instead of shifting (O(1) vs O(n)).
   for (let i = mergedLen - 2; i >= 0; i--) {
     if (!mergedSpace[i]! && !mergedWordLike[i]! && mergedTexts[i]!.length === 1 && kinsokuEnd.has(mergedTexts[i]!)) {
       mergedTexts[i + 1] = mergedTexts[i]! + mergedTexts[i + 1]!
@@ -517,7 +538,7 @@ function prepareInternal(text: string, font: string, includeSegments: boolean): 
 // same PreparedText can be laid out at any maxWidth and lineHeight via layout().
 //
 // Steps:
-//   1. Normalize newlines to spaces (CSS white-space: normal behavior)
+//   1. Normalize collapsible whitespace (CSS white-space: normal behavior)
 //   2. Segment via Intl.Segmenter (handles CJK, Thai, etc.)
 //   3. Merge punctuation into preceding word ("better." as one unit)
 //   4. Split CJK words into individual graphemes (per-character line breaks)

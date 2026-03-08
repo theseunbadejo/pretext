@@ -18,10 +18,27 @@ import { TEXTS, SIZES, WIDTHS } from './test-data.ts'
 const FONT_PATH = '/Library/Fonts/Arial Unicode.ttf'
 const FONT_NAME = 'Arial Unicode'
 
+const collapsibleWhitespaceRunRe = /[ \t\n\r\f]+/g
+const needsWhitespaceNormalizationRe = /[\t\n\r\f]| {2,}|^ | $/
+const openingPunctuation = new Set(['(', '[', '{', '“', '‘', '«', '‹'])
+
 beforeAll(async () => {
   await init()
   loadFont(FONT_NAME, FONT_PATH)
 })
+
+function normalizeWhitespaceNormal(text: string): string {
+  if (!needsWhitespaceNormalizationRe.test(text)) return text
+
+  let normalized = text.replace(collapsibleWhitespaceRunRe, ' ')
+  if (normalized.charCodeAt(0) === 0x20) {
+    normalized = normalized.slice(1)
+  }
+  if (normalized.length > 0 && normalized.charCodeAt(normalized.length - 1) === 0x20) {
+    normalized = normalized.slice(0, -1)
+  }
+  return normalized
+}
 
 // --- Minimal reimplementation of prepare+layout using HarfBuzz ---
 
@@ -39,8 +56,8 @@ function isCJK(s: string): boolean {
 type Segment = { text: string, width: number, isWordLike: boolean, isSpace: boolean }
 
 function segmentAndMeasure(text: string, fontSize: number): Segment[] {
-  const normalized = text.replace(/\n/g, ' ')
-  if (normalized.length === 0 || normalized.trim().length === 0) return []
+  const normalized = normalizeWhitespaceNormal(text)
+  if (normalized.length === 0) return []
 
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
   const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -54,6 +71,13 @@ function segmentAndMeasure(text: string, fontSize: number): Segment[] {
       merged[merged.length - 1]!.text += s.segment
     } else {
       merged.push({ text: s.segment, isWordLike: s.isWordLike ?? false, isSpace: ws })
+    }
+  }
+
+  for (let i = merged.length - 2; i >= 0; i--) {
+    if (!merged[i]!.isSpace && !merged[i]!.isWordLike && merged[i]!.text.length === 1 && openingPunctuation.has(merged[i]!.text)) {
+      merged[i + 1]!.text = merged[i]!.text + merged[i + 1]!.text
+      merged.splice(i, 1)
     }
   }
 
@@ -183,11 +207,24 @@ describe('layout consistency', () => {
     expect(withNewlines.length).toBe(withSpaces.length)
   })
 
+  test('collapsible whitespace runs normalize to a single space', () => {
+    const withRuns = segmentAndMeasure('  Hello\t \n  World  ', 16)
+    const normalized = segmentAndMeasure('Hello World', 16)
+    expect(withRuns.length).toBe(normalized.length)
+    expect(withRuns.map(s => s.text)).toEqual(normalized.map(s => s.text))
+  })
+
   test('punctuation merges with preceding word', () => {
     const segments = segmentAndMeasure('hello.', 16)
     // "hello." should be one segment, not "hello" + "."
     expect(segments.length).toBe(1)
     expect(segments[0]!.text).toBe('hello.')
+  })
+
+  test('opening quotes merge with the following word', () => {
+    const segments = segmentAndMeasure('“Whenever', 16)
+    expect(segments.length).toBe(1)
+    expect(segments[0]!.text).toBe('“Whenever')
   })
 
   test('same text at same width always gives same result', () => {
@@ -205,8 +242,8 @@ describe('layout consistency', () => {
 // --- Precise layout: measures full candidate line as one string ---
 
 function layoutPrecise(text: string, fontSize: number, maxWidth: number, lineHeight: number): { lineCount: number, height: number } {
-  const normalized = text.replace(/\n/g, ' ')
-  if (normalized.length === 0 || normalized.trim().length === 0) return { lineCount: 0, height: 0 }
+  const normalized = normalizeWhitespaceNormal(text)
+  if (normalized.length === 0) return { lineCount: 0, height: 0 }
 
   const segmenter = new Intl.Segmenter(undefined, { granularity: 'word' })
   const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
@@ -220,6 +257,13 @@ function layoutPrecise(text: string, fontSize: number, maxWidth: number, lineHei
       merged[merged.length - 1]!.text += s.segment
     } else {
       merged.push({ text: s.segment, isWordLike: s.isWordLike ?? false, isSpace: ws })
+    }
+  }
+
+  for (let i = merged.length - 2; i >= 0; i--) {
+    if (!merged[i]!.isSpace && !merged[i]!.isWordLike && merged[i]!.text.length === 1 && openingPunctuation.has(merged[i]!.text)) {
+      merged[i + 1]!.text = merged[i]!.text + merged[i + 1]!.text
+      merged.splice(i, 1)
     }
   }
 
