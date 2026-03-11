@@ -11,6 +11,10 @@ export type CollectedLines = {
   lines: LayoutLine[]
 }
 
+export type CollectedLineSlice = CollectedLines & {
+  nextCursor: LayoutCursor | null
+}
+
 export function collectLines(
   prepared: PreparedTextWithSegments,
   maxWidth: number,
@@ -30,5 +34,38 @@ export function collectLines(
     lineCount: lines.length,
     height: lines.length * lineHeight,
     lines,
+  }
+}
+
+export function collectLineSlice(
+  prepared: PreparedTextWithSegments,
+  start: LayoutCursor,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number,
+): CollectedLineSlice {
+  const lines: LayoutLine[] = []
+  let cursor: LayoutCursor = start
+
+  while (lines.length < maxLines) {
+    const line = layoutNextLine(prepared, cursor, maxWidth)
+    if (line === null) {
+      return {
+        lineCount: lines.length,
+        height: lines.length * lineHeight,
+        lines,
+        nextCursor: null,
+      }
+    }
+
+    lines.push(line)
+    cursor = line.end
+  }
+
+  return {
+    lineCount: lines.length,
+    height: lines.length * lineHeight,
+    lines,
+    nextCursor: cursor,
   }
 }

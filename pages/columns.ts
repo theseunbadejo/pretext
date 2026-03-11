@@ -2,10 +2,11 @@ import gatsbyText from './gatsby.txt' with { type: 'text' }
 import mixedAppText from '../corpora/mixed-app-text.txt' with { type: 'text' }
 import {
   prepareWithSegments,
+  type LayoutCursor,
   type LayoutLine,
   type PreparedTextWithSegments,
 } from '../src/layout.ts'
-import { collectLines } from './line-utils.ts'
+import { collectLineSlice } from './line-utils.ts'
 
 const FONT = '20px "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Palatino, serif'
 const LINE_HEIGHT = 32
@@ -102,37 +103,67 @@ function render(): void {
 
   spread.style.width = `${spreadWidth}px`
   const columnWidth = Math.floor(stages[0]!.getBoundingClientRect().width)
-  const laidOut = collectLines(getPrepared(excerpt), columnWidth, LINE_HEIGHT)
+  const prepared = getPrepared(excerpt)
 
-  const totalLines = laidOut.lines.length
-  const capacity = COLUMN_COUNT * targetLines
-  const overflow = Math.max(totalLines - capacity, 0)
+  let cursor: LayoutCursor = { segmentIndex: 0, graphemeIndex: 0 }
+  let totalLines = 0
+  let spillCursor: LayoutCursor | null = null
+  let spillPreviewLines: LayoutLine[] = []
 
   statSpreadWidth.textContent = `${spreadWidth}px`
   statColumnWidth.textContent = `${columnWidth}px`
-  statLineCount.textContent = String(totalLines)
-  statOverflow.textContent = String(overflow)
 
   for (let columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++) {
-    const start = columnIndex * targetLines
-    const end = Math.min(start + targetLines, totalLines)
+    const startLineNumber = totalLines
+    const slice = collectLineSlice(prepared, cursor, columnWidth, LINE_HEIGHT, targetLines)
+    totalLines += slice.lineCount
     renderColumn(
       stages[columnIndex]!,
       metas[columnIndex]!,
-      laidOut.lines.slice(start, end),
-      start,
+      slice.lines,
+      startLineNumber,
       targetLines,
     )
+    if (slice.nextCursor === null) {
+      cursor = slice.lines.length > 0 ? slice.lines[slice.lines.length - 1]!.end : cursor
+      spillCursor = null
+      spillPreviewLines = []
+      for (let rest = columnIndex + 1; rest < COLUMN_COUNT; rest++) {
+        renderColumn(stages[rest]!, metas[rest]!, [], totalLines, targetLines)
+      }
+      break
+    }
+
+    cursor = slice.nextCursor
+    spillCursor = cursor
   }
 
-  if (overflow === 0) {
+  if (spillCursor !== null) {
+    const spillSlice = collectLineSlice(prepared, spillCursor, columnWidth, LINE_HEIGHT, 2)
+    spillPreviewLines = spillSlice.lines
+    totalLines += spillSlice.lineCount
+
+    let countCursor = spillSlice.nextCursor
+    while (countCursor !== null) {
+      const countSlice = collectLineSlice(prepared, countCursor, columnWidth, LINE_HEIGHT, 64)
+      totalLines += countSlice.lineCount
+      countCursor = countSlice.nextCursor
+    }
+  }
+
+  const capacity = COLUMN_COUNT * targetLines
+  const overflow = Math.max(totalLines - capacity, 0)
+
+  statLineCount.textContent = String(totalLines)
+  statOverflow.textContent = String(overflow)
+
+  if (overflow === 0 || spillCursor === null || spillPreviewLines.length === 0) {
     spill.textContent = 'No overflow. All current lines fit inside the three-column spread.'
     return
   }
 
-  const overflowLines = laidOut.lines.slice(capacity)
-  const next = overflowLines[0]!
-  const preview = overflowLines.slice(0, 2).map(line => `“${truncate(line.text, 72)}”`).join(' / ')
+  const next = spillPreviewLines[0]!
+  const preview = spillPreviewLines.map(line => `“${truncate(line.text, 72)}”`).join(' / ')
   spill.textContent =
     `${overflow} overflow lines spill past the current spread. ` +
     `The next hidden line begins at ${formatCursor(next)}. ` +
